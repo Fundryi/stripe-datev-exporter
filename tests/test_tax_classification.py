@@ -75,6 +75,20 @@ class TaxClassificationTest(unittest.TestCase):
     self.assertEqual(ctx["classification"], customer.TAX_CLASS_UNKNOWN_LOCATION)
     self.assertEqual(ctx["warning"], customer.WARNING_UNKNOWN_LOCATION)
 
+  def test_eu_country_list_can_be_overridden(self):
+    ctx = customer.classifyInvoiceTaxTreatment(
+      customer={"address": {"country": "SA"}, "tax_ids": {"data": []}},
+      invoice={
+        "tax": 0,
+        "total": 1000,
+      },
+      merchant_country="DE",
+      eu_country_codes=["SA", "DE"],
+    )
+
+    self.assertEqual(ctx["classification"], customer.TAX_CLASS_EU_B2C_MISSING_VAT_ID)
+    self.assertEqual(ctx["warning"], customer.WARNING_EU_MISSING_VAT_ID)
+
 
 if __name__ == "__main__":
   unittest.main()

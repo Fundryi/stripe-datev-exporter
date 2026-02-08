@@ -44,8 +44,16 @@ PDFs/receipts are grouped by month in `./out/pdf/<YYYY>/<MM>/`.
 Optional `config.toml` settings:
 
 - `company.country` (default: `DE`)
+- `company.eu_country_codes` (optional override of EU country list for classifier)
 - `accounts.revenue_non_eu_outside_scope` (default fallback: `accounts.account_reverse_charge_world`)
 - `accounts.revenue_eu_b2c_missing_vat_id` (default fallback: `accounts.revenue_german_vat`)
+
+### Local Extension Layer
+
+Local custom behavior can live in `stripe_datev_local/` so upstream merges stay low-conflict:
+
+- `stripe_datev_local/tax_policy.py` for tax classification/country logic
+- `stripe_datev_local/output_layout.py` for output folder/layout policy
 
 ```
 python stripe-datev-cli.py fees <year> <month>

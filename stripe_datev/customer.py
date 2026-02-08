@@ -5,6 +5,7 @@ import sys
 import stripe
 
 from stripe_datev import config, output
+from stripe_datev_local import tax_policy
 
 FILL_LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(
   os.path.realpath(__file__))), '.fill_account_numbers_log.json')
@@ -38,255 +39,105 @@ def getCustomerName(customer):
 tax_ids_cached = {}
 
 
-def getCustomerTaxId(customer):
-  tax_ids = _obj_get(customer, "tax_ids")
-  if tax_ids is not None:
-    return _find_eu_vat_id(tax_ids)
+TAX_CLASS_EU_VAT_CHARGED = tax_policy.TAX_CLASS_EU_VAT_CHARGED
+TAX_CLASS_EU_REVERSE_CHARGE = tax_policy.TAX_CLASS_EU_REVERSE_CHARGE
+TAX_CLASS_EU_B2C_MISSING_VAT_ID = tax_policy.TAX_CLASS_EU_B2C_MISSING_VAT_ID
+TAX_CLASS_NON_EU_OUTSIDE_SCOPE = tax_policy.TAX_CLASS_NON_EU_OUTSIDE_SCOPE
+TAX_CLASS_UNKNOWN_LOCATION = tax_policy.TAX_CLASS_UNKNOWN_LOCATION
+TAX_CLASS_TAX_CHARGED_OTHER = tax_policy.TAX_CLASS_TAX_CHARGED_OTHER
 
-  customer_id = _obj_get(customer, "id")
-  if customer_id in tax_ids_cached:
-    return tax_ids_cached[customer_id]
-  if customer_id is None:
-    return None
-
-  ids = stripe.Customer.list_tax_ids(customer_id, limit=10).data
-  tax_id = _find_eu_vat_id(ids)
-  tax_ids_cached[customer_id] = tax_id
-  return tax_id
-
-
-EU_COUNTRY_CODES = [
-  "AT",
-  "BE",
-  "BG",
-  "CY",
-  "CZ",
-  "DK",
-  "EE",
-  "FI",
-  "FR",
-  "DE",
-  "GR",
-  "HU",
-  "IE",
-  "IT",
-  "LV",
-  "LT",
-  "LU",
-  "MT",
-  "NL",
-  "PL",
-  "PT",
-  "RO",
-  "SK",
-  "SI",
-  "ES",
-  "SE",
-]
-
-EU_VAT_PREFIXES = set(EU_COUNTRY_CODES + ["EL"])
-
-TAX_CLASS_EU_VAT_CHARGED = "eu_vat_charged"
-TAX_CLASS_EU_REVERSE_CHARGE = "eu_reverse_charge"
-TAX_CLASS_EU_B2C_MISSING_VAT_ID = "eu_b2c_missing_vat_id"
-TAX_CLASS_NON_EU_OUTSIDE_SCOPE = "non_eu_outside_scope"
-TAX_CLASS_UNKNOWN_LOCATION = "unknown_location"
-TAX_CLASS_TAX_CHARGED_OTHER = "tax_charged_other"
-
-WARNING_EU_MISSING_VAT_ID = "EU customer without VAT ID and no VAT charged — should be B2C VAT, check setup"
-WARNING_UNKNOWN_LOCATION = "Cannot determine customer country — cannot safely classify tax treatment"
-
-
-def normalizeCountryCode(code):
-  if code is None:
-    return None
-  code = str(code).strip().upper()
-  if code == "":
-    return None
-  return code
-
-
-def isEUCountry(code):
-  code = normalizeCountryCode(code)
-  return code in EU_COUNTRY_CODES if code is not None else False
+WARNING_EU_MISSING_VAT_ID = tax_policy.WARNING_EU_MISSING_VAT_ID
+WARNING_UNKNOWN_LOCATION = tax_policy.WARNING_UNKNOWN_LOCATION
 
 
 def _obj_get(value, key, default=None):
-  if value is None:
-    return default
-  if isinstance(value, dict):
-    return value.get(key, default)
-  try:
-    return value.get(key, default)
-  except Exception:
-    return getattr(value, key, default)
+  return tax_policy.obj_get(value, key, default)
 
 
 def _nested_get(value, path, default=None):
-  cursor = value
-  for key in path:
-    cursor = _obj_get(cursor, key)
-    if cursor is None:
-      return default
-  return cursor
+  return tax_policy.nested_get(value, path, default)
 
 
-def _iter_tax_ids(tax_ids):
-  if tax_ids is None:
-    return []
-
-  if isinstance(tax_ids, list):
-    return tax_ids
-
-  data = _obj_get(tax_ids, "data")
-  if isinstance(data, list):
-    return data
-
-  try:
-    return list(tax_ids)
-  except Exception:
-    return []
+def getEUCountryCodes():
+  return tax_policy.resolve_eu_country_codes(company_config=config.company)
 
 
-def _tax_id_value(tax_id):
-  value = _obj_get(tax_id, "value")
-  if value is None:
-    return None
-  value = str(value).strip().upper()
-  return value or None
+def normalizeCountryCode(code):
+  return tax_policy.normalize_country_code(code)
 
 
-def _tax_id_is_eu_vat(tax_id):
-  tax_type = _obj_get(tax_id, "type")
-  tax_type = str(tax_type).strip().lower() if tax_type is not None else ""
-  value = _tax_id_value(tax_id)
-  if value is None:
-    return False
-  if tax_type == "eu_vat":
-    return True
-  return value[:2] in EU_VAT_PREFIXES
+def isEUCountry(code):
+  return tax_policy.is_eu_country(code, eu_country_codes=getEUCountryCodes())
 
 
-def _find_eu_vat_id(tax_ids):
-  for tax_id in _iter_tax_ids(tax_ids):
-    if _tax_id_is_eu_vat(tax_id):
-      return _tax_id_value(tax_id)
-  return None
+def getCustomerTaxId(customer, eu_country_codes=None):
+  eu_country_codes = tax_policy.resolve_eu_country_codes(
+    company_config=config.company, eu_country_codes=eu_country_codes)
+  tax_ids = _obj_get(customer, "tax_ids")
+  if tax_ids is not None:
+    return tax_policy.find_eu_vat_id(tax_ids, eu_country_codes=eu_country_codes)
 
-
-def getInvoiceTaxId(invoice):
-  if invoice is None:
+  customer_id = _obj_get(customer, "id")
+  if customer_id is None:
     return None
 
-  for tax_ids in [
-      _obj_get(invoice, "customer_tax_ids"),
-      _nested_get(invoice, ["customer_details", "tax_ids"]),
-  ]:
-    vat_id = _find_eu_vat_id(tax_ids)
-    if vat_id is not None:
-      return vat_id
-  return None
+  cache_key = (customer_id, tuple(eu_country_codes))
+  if cache_key in tax_ids_cached:
+    return tax_ids_cached[cache_key]
+
+  ids = stripe.Customer.list_tax_ids(customer_id, limit=10).data
+  tax_id = tax_policy.find_eu_vat_id(ids, eu_country_codes=eu_country_codes)
+  tax_ids_cached[cache_key] = tax_id
+  return tax_id
+
+
+def getInvoiceTaxId(invoice, eu_country_codes=None):
+  eu_country_codes = tax_policy.resolve_eu_country_codes(
+    company_config=config.company, eu_country_codes=eu_country_codes)
+  return tax_policy.get_invoice_tax_id(invoice, eu_country_codes=eu_country_codes)
 
 
 def resolveCustomerCountry(customer, invoice=None):
-  if invoice is not None:
-    for path in [
-        ["customer_shipping", "address", "country"],
-        ["customer_address", "country"],
-        ["customer_details", "address", "country"],
-    ]:
-      country = normalizeCountryCode(_nested_get(invoice, path))
-      if country is not None:
-        return country
-
-  country = normalizeCountryCode(_nested_get(customer, ["address", "country"]))
-  if country is not None:
-    return country
-
-  customer_id = _obj_get(customer, "id")
-  if customer_id is not None:
-    try:
-      refreshed = retrieveCustomer(customer_id)
-      country = normalizeCountryCode(_nested_get(refreshed, ["address", "country"]))
-      if country is not None:
-        return country
-    except Exception:
-      pass
-
-  return "unknown"
+  return tax_policy.resolve_customer_country(
+    customer, invoice=invoice, retrieve_customer_by_id=retrieveCustomer)
 
 
 def getTaxClassificationWarning(tax_classification):
-  if tax_classification == TAX_CLASS_EU_B2C_MISSING_VAT_ID:
-    return WARNING_EU_MISSING_VAT_ID
-  if tax_classification == TAX_CLASS_UNKNOWN_LOCATION:
-    return WARNING_UNKNOWN_LOCATION
-  return None
+  return tax_policy.get_tax_classification_warning(tax_classification)
 
 
-def _to_minor_amount(value):
-  if value is None:
-    return None
-  try:
-    return int(value)
-  except Exception:
-    return None
+def classifyTaxTreatment(country, invoice_tax, merchant_country, has_eu_vat_id, eu_country_codes=None):
+  eu_country_codes = tax_policy.resolve_eu_country_codes(
+    company_config=config.company, eu_country_codes=eu_country_codes)
+  return tax_policy.classify_tax_treatment(
+    country=country,
+    invoice_tax=invoice_tax,
+    merchant_country=merchant_country,
+    has_eu_vat_id=has_eu_vat_id,
+    eu_country_codes=eu_country_codes,
+  )
 
 
-def classifyTaxTreatment(country, invoice_tax, merchant_country, has_eu_vat_id):
-  country = normalizeCountryCode(country)
-  merchant_country = normalizeCountryCode(merchant_country) or "DE"
-  tax_amount = _to_minor_amount(invoice_tax)
-  tax_is_zero = tax_amount is None or tax_amount == 0
-
-  if country is None or country == "UNKNOWN":
-    return TAX_CLASS_UNKNOWN_LOCATION
-
-  if isEUCountry(country):
-    if tax_amount is not None and tax_amount > 0:
-      return TAX_CLASS_EU_VAT_CHARGED
-    if tax_is_zero and country != merchant_country and has_eu_vat_id:
-      return TAX_CLASS_EU_REVERSE_CHARGE
-    if tax_is_zero:
-      return TAX_CLASS_EU_B2C_MISSING_VAT_ID
-    return TAX_CLASS_TAX_CHARGED_OTHER
-
-  if tax_is_zero:
-    return TAX_CLASS_NON_EU_OUTSIDE_SCOPE
-  return TAX_CLASS_TAX_CHARGED_OTHER
-
-
-def classifyInvoiceTaxTreatment(customer, invoice=None, checkout_session=None, merchant_country=None):
+def classifyInvoiceTaxTreatment(customer, invoice=None, checkout_session=None, merchant_country=None, eu_country_codes=None):
   merchant_country = normalizeCountryCode(merchant_country)
   if merchant_country is None:
     merchant_country = normalizeCountryCode(config.company.get("country", "DE")) or "DE"
 
-  invoice_tax = None
-  invoice_total = None
-  if invoice is not None:
-    invoice_tax = _obj_get(invoice, "tax")
-    invoice_total = _obj_get(invoice, "total")
-  elif checkout_session is not None:
-    invoice_tax = _nested_get(checkout_session, ["total_details", "amount_tax"])
-    invoice_total = _obj_get(checkout_session, "amount_total")
+  eu_country_codes = tax_policy.resolve_eu_country_codes(
+    company_config=config.company, eu_country_codes=eu_country_codes)
 
-  country = resolveCustomerCountry(customer, invoice=invoice)
-  vat_id = getInvoiceTaxId(invoice) or getCustomerTaxId(customer)
-  tax_classification = classifyTaxTreatment(
-    country=country,
-    invoice_tax=invoice_tax,
+  def get_customer_tax_id_local(cus):
+    return getCustomerTaxId(cus, eu_country_codes=eu_country_codes)
+
+  return tax_policy.classify_invoice_tax_treatment(
+    customer,
+    get_customer_tax_id=get_customer_tax_id_local,
+    invoice=invoice,
+    checkout_session=checkout_session,
     merchant_country=merchant_country,
-    has_eu_vat_id=vat_id is not None,
+    eu_country_codes=eu_country_codes,
+    retrieve_customer_by_id=retrieveCustomer,
   )
-
-  return {
-    "classification": tax_classification,
-    "country": country,
-    "vat_id": vat_id,
-    "invoice_tax": invoice_tax,
-    "invoice_total": invoice_total,
-    "warning": getTaxClassificationWarning(tax_classification),
-  }
 
 
 def _account_value(key, fallback_key=None, default=""):
@@ -298,6 +149,7 @@ def _account_value(key, fallback_key=None, default=""):
 
 
 def getAccountingProps(customer, invoice=None, checkout_session=None):
+  eu_country_codes = getEUCountryCodes()
   merchant_country = normalizeCountryCode(config.company.get("country", "DE")) or "DE"
 
   props = {
@@ -318,6 +170,7 @@ def getAccountingProps(customer, invoice=None, checkout_session=None):
     invoice=invoice,
     checkout_session=checkout_session,
     merchant_country=merchant_country,
+    eu_country_codes=eu_country_codes,
   )
   country = tax_context["country"]
   invoice_tax = tax_context["invoice_tax"]

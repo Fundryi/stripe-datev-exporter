@@ -3,7 +3,7 @@ from distutils.core import setup
 setup(
     name='Stripe DATEV Exporter',
     version='0.0.1',
-    packages=['stripe_datev',],
+    packages=['stripe_datev', 'stripe_datev_local'],
     install_requires=[
       'stripe',
     ],

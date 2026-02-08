@@ -2,6 +2,8 @@
 timezone = "Europe/Berlin"
 # Merchant country (ISO 3166-1 alpha-2), used for VAT classification
 country = "DE"
+# Optional override for EU country codes used by tax classification
+# eu_country_codes = ["AT", "BE", "BG", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE"]
 
 [datev]
 berater_nr = 1

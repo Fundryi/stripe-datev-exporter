@@ -18,6 +18,7 @@ import os.path
 import requests
 import dotenv
 import pytz
+from stripe_datev_local import output_layout
 
 dotenv.load_dotenv()
 
@@ -152,12 +153,6 @@ class StripeDatevCli(object):
     if not os.path.exists(pdfDir):
       os.mkdir(pdfDir)
 
-    def resolve_pdf_file_path(file_name, file_date):
-      monthly_dir = os.path.join(pdfDir, file_date.strftime("%Y"), file_date.strftime("%m"))
-      if not os.path.exists(monthly_dir):
-        os.makedirs(monthly_dir, exist_ok=True)
-      return os.path.join(monthly_dir, file_name)
-
     for invoice in invoices:
       pdfLink = invoice.invoice_pdf
       finalized_date = datetime.fromtimestamp(
@@ -165,9 +160,9 @@ class StripeDatevCli(object):
       invNo = invoice.number
 
       fileName = "{} {}.pdf".format(finalized_date.strftime("%Y-%m-%d"), invNo)
-      filePath = resolve_pdf_file_path(fileName, finalized_date)
-      legacyFilePath = os.path.join(pdfDir, fileName)
-      if os.path.exists(filePath) or os.path.exists(legacyFilePath):
+      filePath, legacyFilePath = output_layout.resolve_pdf_paths(
+        pdfDir, fileName, finalized_date)
+      if output_layout.file_exists(filePath, legacyFilePath):
         # print("{} exists, skipping".format(filePath))
         continue
 
@@ -185,9 +180,9 @@ class StripeDatevCli(object):
       created = datetime.fromtimestamp(charge.created, timezone.utc)
       fileName = "{} {}.html".format(
         created.strftime("%Y-%m-%d"), charge.receipt_number or charge.id)
-      filePath = resolve_pdf_file_path(fileName, created)
-      legacyFilePath = os.path.join(pdfDir, fileName)
-      if os.path.exists(filePath) or os.path.exists(legacyFilePath):
+      filePath, legacyFilePath = output_layout.resolve_pdf_paths(
+        pdfDir, fileName, created)
+      if output_layout.file_exists(filePath, legacyFilePath):
         # print("{} exists, skipping".format(filePath))
         continue
 
