@@ -106,6 +106,25 @@ Optional `config.toml` settings:
 
 If you are unsure about any account/BU key, confirm the mapping with your accountant/tax advisor before importing.
 
+### Only One Real Bank Account?
+
+Even with one physical bank account, DATEV mapping typically uses at least one Stripe clearing flow:
+
+- `accounts.bank` is the Stripe clearing account in exporter logic.
+- `accounts.transit` is the payout-clearing bridge for reconciliation with your real bank statement.
+
+Recommended with bank statement import:
+
+1. `accounts.bank` = Stripe clearing account
+2. `accounts.transit` = payout clearing account
+3. Book imported Hausbank payout receipt against `accounts.transit`
+
+Alternative without bank statement import for these payouts:
+
+1. `accounts.bank` = Stripe clearing account
+2. `accounts.transit` can be the Hausbank account
+3. Do not additionally import/book the same payout from bank statement (avoid duplicates)
+
 ### Validate DATEV Files
 
 ```bash

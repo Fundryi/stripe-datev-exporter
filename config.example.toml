@@ -68,6 +68,15 @@ mandenten_nr = 1
 #     physical Hausbank account.
 #   - `transit` = payout clearing account used to reconcile Stripe payouts
 #     against your imported real bank statement.
+# PRACTICAL SETUP FOR ACCOUNTANT (important):
+# - If bank statements are imported into DATEV (recommended):
+#   1) `bank`   = Stripe clearing account
+#   2) `transit`= payout clearing account (money in transit)
+#   3) Hausbank receipt from statement is booked against `transit`.
+# - If NO bank statement import is used for those payouts:
+#   1) `bank`   = Stripe clearing account
+#   2) `transit` can be the Hausbank account directly
+#   3) then do NOT book/import the same payout again via bank statement.
 # ---------------------------------------------------------------------------
 
 # Stripe clearing account for incoming payment movements and Stripe fees.
