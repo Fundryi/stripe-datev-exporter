@@ -45,6 +45,7 @@ class StripeDatevCli(object):
       'download',
       'validate_customers',
       'fill_account_numbers',
+      'clear_account_numbers',
       'list_accounts',
       'opos',
       'fees',
@@ -151,6 +152,12 @@ class StripeDatevCli(object):
     if not os.path.exists(pdfDir):
       os.mkdir(pdfDir)
 
+    def resolve_pdf_file_path(file_name, file_date):
+      monthly_dir = os.path.join(pdfDir, file_date.strftime("%Y"), file_date.strftime("%m"))
+      if not os.path.exists(monthly_dir):
+        os.makedirs(monthly_dir, exist_ok=True)
+      return os.path.join(monthly_dir, file_name)
+
     for invoice in invoices:
       pdfLink = invoice.invoice_pdf
       finalized_date = datetime.fromtimestamp(
@@ -158,8 +165,9 @@ class StripeDatevCli(object):
       invNo = invoice.number
 
       fileName = "{} {}.pdf".format(finalized_date.strftime("%Y-%m-%d"), invNo)
-      filePath = os.path.join(pdfDir, fileName)
-      if os.path.exists(filePath):
+      filePath = resolve_pdf_file_path(fileName, finalized_date)
+      legacyFilePath = os.path.join(pdfDir, fileName)
+      if os.path.exists(filePath) or os.path.exists(legacyFilePath):
         # print("{} exists, skipping".format(filePath))
         continue
 
@@ -174,10 +182,12 @@ class StripeDatevCli(object):
         fp.write(r.content)
 
     for charge in charges + list(map(lambda tx: tx["source"]["destination_payment"], filter(lambda tx: tx["type"] == "transfer", balance_transactions))):
-      fileName = "{} {}.html".format(datetime.fromtimestamp(
-        charge.created, timezone.utc).strftime("%Y-%m-%d"), charge.receipt_number or charge.id)
-      filePath = os.path.join(pdfDir, fileName)
-      if os.path.exists(filePath):
+      created = datetime.fromtimestamp(charge.created, timezone.utc)
+      fileName = "{} {}.html".format(
+        created.strftime("%Y-%m-%d"), charge.receipt_number or charge.id)
+      filePath = resolve_pdf_file_path(fileName, created)
+      legacyFilePath = os.path.join(pdfDir, fileName)
+      if os.path.exists(filePath) or os.path.exists(legacyFilePath):
         # print("{} exists, skipping".format(filePath))
         continue
 
@@ -229,6 +239,9 @@ class StripeDatevCli(object):
 
   def fill_account_numbers(self, argv):
     stripe_datev.customer.fill_account_numbers()
+
+  def clear_account_numbers(self, argv):
+    stripe_datev.customer.clear_account_numbers()
 
   def list_accounts(self, argv):
     stripe_datev.customer.list_account_numbers(

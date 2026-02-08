@@ -29,9 +29,12 @@ def createAccountingRecords(balance_transactions):
     if tx["reporting_category"] == "charge" or tx["reporting_category"] == "charge_failure":
       charge = tx.source
       cus = customer.retrieveCustomer(charge.customer)
-      accounting_props = customer.getAccountingProps(cus)
+      charge_invoice = charge.invoice if not isinstance(
+        charge.invoice, str) else None
+      accounting_props = customer.getAccountingProps(cus, invoice=charge_invoice)
       if charge.invoice:
-        number = charge.invoice.number
+        number = charge.invoice if isinstance(
+          charge.invoice, str) else charge.invoice.number
       else:
         number = charge.receipt_number
       fee_desc = tx.fee_details[0].description
@@ -75,9 +78,12 @@ def createAccountingRecords(balance_transactions):
     elif tx["reporting_category"] == "refund":
       charge = tx.source.charge
       cus = customer.retrieveCustomer(charge.customer)
-      accounting_props = customer.getAccountingProps(cus)
+      charge_invoice = charge.invoice if not isinstance(
+        charge.invoice, str) else None
+      accounting_props = customer.getAccountingProps(cus, invoice=charge_invoice)
       if charge.invoice:
-        number = charge.invoice.number
+        number = charge.invoice if isinstance(
+          charge.invoice, str) else charge.invoice.number
       else:
         number = charge.receipt_number
 

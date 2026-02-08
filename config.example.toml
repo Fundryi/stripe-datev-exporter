@@ -1,5 +1,7 @@
 [company]
 timezone = "Europe/Berlin"
+# Merchant country (ISO 3166-1 alpha-2), used for VAT classification
+country = "DE"
 
 [datev]
 berater_nr = 1
@@ -18,6 +20,12 @@ prap = "990"
 revenue_german_vat = "8400"
 revenue_reverse_charge_eu = "8336"
 account_reverse_charge_world = "8338"
+# Optional: dedicated account for non-EU outside-scope/export revenue
+# Defaults to account_reverse_charge_world when omitted
+revenue_non_eu_outside_scope = "8338"
+# Optional: fallback mapping for EU customers without VAT ID and tax=0
+# Defaults to revenue_german_vat when omitted
+revenue_eu_b2c_missing_vat_id = "8400"
 
 datev_tax_key_germany_invoice = ""
 datev_tax_key_germany_payment = ""

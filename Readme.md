@@ -32,6 +32,21 @@ python stripe-datev-cli.py download <year> <month>
 
 Processes all invoices, charges and transactions in the given month. Outputs DATEV records in `./out/datev`, CSV summaries in `./out/overview` and `./out/monthly_recognition`. Downloads PDF receipts to `./out/pdf`.
 
+PDFs/receipts are grouped by month in `./out/pdf/<YYYY>/<MM>/`.
+
+### Tax Classification Notes
+
+- Reverse charge is only used for EU B2B cases with VAT-ID evidence (`eu_reverse_charge`).
+- Non-EU invoices with zero tax are classified as outside-scope/export (`non_eu_outside_scope`) and are not labeled as reverse charge.
+- EU invoices with zero tax and missing VAT ID are flagged with a warning and classified as `eu_b2c_missing_vat_id`.
+- Missing country data is flagged with a warning and classified as `unknown_location`.
+
+Optional `config.toml` settings:
+
+- `company.country` (default: `DE`)
+- `accounts.revenue_non_eu_outside_scope` (default fallback: `accounts.account_reverse_charge_world`)
+- `accounts.revenue_eu_b2c_missing_vat_id` (default fallback: `accounts.revenue_german_vat`)
+
 ```
 python stripe-datev-cli.py fees <year> <month>
 ```
