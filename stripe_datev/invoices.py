@@ -65,11 +65,16 @@ def getLineItemRecognitionRange(line_item, invoice):
   start = None
   end = None
   if "period" in line_item:
-    start = datetime.fromtimestamp(line_item["period"]["start"], timezone.utc)
-    end = datetime.fromtimestamp(line_item["period"]["end"], timezone.utc)
-  if start == end:
-    start = None
-    end = None
+    period_start = line_item["period"].get("start")
+    period_end = line_item["period"].get("end")
+    if period_start is not None and period_end is not None:
+      start = datetime.fromtimestamp(period_start, timezone.utc)
+      end = datetime.fromtimestamp(period_end, timezone.utc)
+      if end < start:
+        print("Warning: invalid period for line item --",
+              invoice.id, line_item.get("description"))
+        start = None
+        end = None
 
   # if start is None and end is None:
   #   desc_parts = line_item.get("description", "").split(";")

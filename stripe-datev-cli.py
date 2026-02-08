@@ -15,10 +15,11 @@ import \
   stripe_datev.balance
 import os
 import os.path
-import requests
 import dotenv
 import pytz
 from stripe_datev_local import output_layout
+from stripe_datev_local import downloads
+from stripe_datev_local import datev_validation
 
 dotenv.load_dotenv()
 
@@ -45,6 +46,7 @@ class StripeDatevCli(object):
     parser.add_argument('command', type=str, help='Subcommand to run', choices=[
       'download',
       'validate_customers',
+      'validate_exports',
       'fill_account_numbers',
       'clear_account_numbers',
       'list_accounts',
@@ -60,6 +62,20 @@ class StripeDatevCli(object):
     parser = argparse.ArgumentParser(prog="stripe-datev-cli.py download")
     parser.add_argument('year', type=int, help='year to download data for')
     parser.add_argument('month', type=int, help='month to download data for')
+    parser.add_argument('--pdf-workers', type=int, default=int(stripe_datev.config.download.get("pdf_workers", 23)),
+                        help='parallel workers for PDF/receipt downloads (1-24, default from config.download.pdf_workers)')
+    parser.add_argument('--pdf-max-rps', type=int, default=int(stripe_datev.config.download.get("pdf_max_rps", 23)),
+                        help='max PDF/receipt HTTP requests per second (0 disables throttle, default from config.download.pdf_max_rps)')
+    parser.add_argument('--pdf-timeout', type=int, default=int(stripe_datev.config.download.get("pdf_timeout", 30)),
+                        help='HTTP timeout seconds for PDF/receipt downloads (default from config.download.pdf_timeout)')
+    parser.add_argument('--pdf-retries', type=int, default=int(stripe_datev.config.download.get("pdf_retries", 4)),
+                        help='retries for transient PDF/receipt download failures (default from config.download.pdf_retries)')
+    parser.set_defaults(skip_historical_warnings=bool(
+      stripe_datev.config.download.get("skip_historical_warnings", True)))
+    parser.add_argument('--skip-historical-warnings', dest='skip_historical_warnings', action='store_true',
+                        help='skip cross-month warning scan for earlier invoice changes and credit notes')
+    parser.add_argument('--include-historical-warnings', dest='skip_historical_warnings', action='store_false',
+                        help='force-enable cross-month warning scan even if config defaults to skip')
 
     args = parser.parse_args(argv)
 
@@ -80,6 +96,9 @@ class StripeDatevCli(object):
       "%Y-%m-%d"), (toTime - timedelta(0, 1)).strftime("%Y-%m-%d"), stripe_datev.config.accounting_tz))
     thisMonth = fromTime.astimezone(
       stripe_datev.config.accounting_tz).strftime("%Y-%m")
+    run_label = output_layout.period_label(year, month)
+    output_dirs = output_layout.ensure_download_dirs(out_dir, year, month)
+    print("Output root {}".format(os.path.relpath(output_dirs["root"], os.getcwd())))
 
     invoices = list(
       reversed(list(stripe_datev.invoices.listFinalizedInvoices(fromTime, toTime))))
@@ -98,27 +117,19 @@ class StripeDatevCli(object):
       lambda charge: not stripe_datev.charges.chargeHasInvoice(charge), charges))
     revenue_items += stripe_datev.charges.createRevenueItems(direct_charges)
 
-    overview_dir = os.path.join(out_dir, "overview")
-    if not os.path.exists(overview_dir):
-      os.mkdir(overview_dir)
-
-    with open(os.path.join(overview_dir, "overview-{:04d}-{:02d}.csv".format(year, month)), "w", encoding="utf-8") as fp:
+    overview_dir = output_dirs["overview"]
+    with open(os.path.join(overview_dir, "overview-{}.csv".format(run_label)), "w", encoding="utf-8") as fp:
       fp.write(stripe_datev.invoices.to_csv(invoices))
       print("Wrote {} invoices      to {}".format(
         str(len(invoices)).rjust(4, " "), os.path.relpath(fp.name, os.getcwd())))
 
-    monthly_recognition_dir = os.path.join(out_dir, "monthly_recognition")
-    if not os.path.exists(monthly_recognition_dir):
-      os.mkdir(monthly_recognition_dir)
-
-    with open(os.path.join(monthly_recognition_dir, "monthly_recognition-{}.csv".format(thisMonth)), "w", encoding="utf-8") as fp:
+    monthly_recognition_dir = output_dirs["monthly_recognition"]
+    with open(os.path.join(monthly_recognition_dir, "monthly_recognition-{}.csv".format(run_label)), "w", encoding="utf-8") as fp:
       fp.write(stripe_datev.invoices.to_recognized_month_csv2(revenue_items))
       print("Wrote {} revenue items to {}".format(
         str(len(revenue_items)).rjust(4, " "), os.path.relpath(fp.name, os.getcwd())))
 
-    datevDir = os.path.join(out_dir, 'datev')
-    if not os.path.exists(datevDir):
-      os.mkdir(datevDir)
+    datevDir = output_dirs["datev"]
 
     # Datev Revenue
 
@@ -128,30 +139,38 @@ class StripeDatevCli(object):
 
     records_by_month = {}
     for record in records:
-      month = record["date"].strftime("%Y-%m")
-      records_by_month[month] = records_by_month.get(month, []) + [record]
+      record_month = record["date"].strftime("%Y-%m")
+      records_by_month[record_month] = records_by_month.get(record_month, []) + [record]
 
-    for month, records in records_by_month.items():
-      if month == thisMonth:
-        name = "EXTF_{}_Revenue.csv".format(thisMonth)
+    for record_month, month_records in records_by_month.items():
+      if month > 0:
+        if record_month == thisMonth:
+          name = "EXTF_{}_Revenue.csv".format(thisMonth)
+        else:
+          name = "EXTF_{}_Revenue_From_{}.csv".format(record_month, thisMonth)
+        bezeichnung = "Stripe Revenue {} from {}".format(record_month, thisMonth)
       else:
-        name = "EXTF_{}_Revenue_From_{}.csv".format(month, thisMonth)
+        name = "EXTF_{}_Revenue.csv".format(record_month)
+        bezeichnung = "Stripe Revenue {}".format(record_month)
       stripe_datev.output.writeRecords(os.path.join(
-        datevDir, name), records, bezeichung="Stripe Revenue {} from {}".format(month, thisMonth))
+        datevDir, name), month_records, bezeichung=bezeichnung)
 
     # Datev Balance
 
     balance_records = stripe_datev.balance.createAccountingRecords(
       balance_transactions)
 
+    balance_label = thisMonth if month > 0 else run_label
     stripe_datev.output.writeRecords(os.path.join(datevDir, "EXTF_{}_Balance.csv".format(
-      thisMonth)), balance_records, bezeichung="Stripe Balance {}".format(thisMonth))
+      balance_label)), balance_records, bezeichung="Stripe Balance {}".format(balance_label))
 
     # PDF
 
-    pdfDir = os.path.join(out_dir, 'pdf')
-    if not os.path.exists(pdfDir):
-      os.mkdir(pdfDir)
+    pdfDir = output_dirs["pdf"]
+
+    pdf_jobs = []
+    pdf_skipped_existing = 0
+    pdf_skipped_missing_link = 0
 
     for invoice in invoices:
       pdfLink = invoice.invoice_pdf
@@ -164,19 +183,20 @@ class StripeDatevCli(object):
         pdfDir, fileName, finalized_date)
       if output_layout.file_exists(filePath, legacyFilePath):
         # print("{} exists, skipping".format(filePath))
+        pdf_skipped_existing += 1
         continue
 
       if not pdfLink:
+        pdf_skipped_missing_link += 1
         continue
-      print("Downloading {} to {}".format(pdfLink, filePath))
-      r = requests.get(pdfLink)
-      if r.status_code != 200:
-        print("HTTP status {}".format(r.status_code))
-        continue
-      with open(filePath, "wb") as fp:
-        fp.write(r.content)
+      pdf_jobs.append({
+        "url": pdfLink,
+        "file_path": filePath,
+      })
 
     for charge in charges + list(map(lambda tx: tx["source"]["destination_payment"], filter(lambda tx: tx["type"] == "transfer", balance_transactions))):
+      if charge is None:
+        continue
       created = datetime.fromtimestamp(charge.created, timezone.utc)
       fileName = "{} {}.html".format(
         created.strftime("%Y-%m-%d"), charge.receipt_number or charge.id)
@@ -184,50 +204,110 @@ class StripeDatevCli(object):
         pdfDir, fileName, created)
       if output_layout.file_exists(filePath, legacyFilePath):
         # print("{} exists, skipping".format(filePath))
+        pdf_skipped_existing += 1
         continue
 
       pdfLink = charge["receipt_url"]
       if not pdfLink:
+        pdf_skipped_missing_link += 1
         continue
-      print("Downloading {} to {}".format(pdfLink, filePath))
-      r = requests.get(pdfLink)
-      if r.status_code != 200:
-        print("HTTP status {}".format(r.status_code))
-        continue
-      with open(filePath, "wb") as fp:
-        fp.write(r.content)
+      pdf_jobs.append({
+        "url": pdfLink,
+        "file_path": filePath,
+      })
+
+    pdf_workers = downloads.bounded_workers(args.pdf_workers, default_workers=3)
+    print("PDF download queue: {} file(s), skipped existing {}, skipped missing link {}, workers {}, max_rps {}, timeout {}s, retries {}".format(
+      len(pdf_jobs),
+      pdf_skipped_existing,
+      pdf_skipped_missing_link,
+      pdf_workers,
+      max(0, int(args.pdf_max_rps)),
+      args.pdf_timeout,
+      args.pdf_retries,
+    ))
+    download_result = downloads.download_many(
+      pdf_jobs,
+      workers=pdf_workers,
+      max_requests_per_second=max(0, int(args.pdf_max_rps)),
+      timeout_seconds=args.pdf_timeout,
+      max_retries=max(0, int(args.pdf_retries)),
+      progress_every=100,
+    )
+    if download_result["failed"] > 0:
+      print("Warning: {} PDF/receipt download(s) failed".format(
+        download_result["failed"]))
 
     # Warnings about changes to earlier invoices
 
-    for status in ["uncollectible", "void"]:
-      for invoice in stripe.Invoice.list(
-          created={
-              "lt": int(fromTime.timestamp()),
-              "gte": int((fromTime - 24 * datedelta.MONTH).timestamp()),
-          },
-          status=status,
-      ).auto_paging_iter():
-        if (invoice.status_transitions.voided_at and datetime.fromtimestamp(
-          invoice.status_transitions.voided_at, timezone.utc) >= fromTime and datetime.fromtimestamp(
-          invoice.status_transitions.voided_at, timezone.utc) < toTime) or (invoice.status_transitions.marked_uncollectible_at and datetime.fromtimestamp(
-              invoice.status_transitions.marked_uncollectible_at, timezone.utc) >= fromTime and datetime.fromtimestamp(
-              invoice.status_transitions.marked_uncollectible_at, timezone.utc) < toTime
-          ):
-          print("Warning: found earlier invoice {} changed status to {} in this month, consider downloading {} again".format(invoice.id, status, datetime.fromtimestamp(
-              invoice.status_transitions.finalized_at, timezone.utc).astimezone(stripe_datev.config.accounting_tz).strftime("%Y-%m")))
+    if args.skip_historical_warnings:
+      print("Skipping historical cross-month warning scan (--skip-historical-warnings)")
+    else:
+      for status in ["uncollectible", "void"]:
+        for invoice in stripe.Invoice.list(
+            created={
+                "lt": int(fromTime.timestamp()),
+                "gte": int((fromTime - 24 * datedelta.MONTH).timestamp()),
+            },
+            status=status,
+        ).auto_paging_iter():
+          if (invoice.status_transitions.voided_at and datetime.fromtimestamp(
+            invoice.status_transitions.voided_at, timezone.utc) >= fromTime and datetime.fromtimestamp(
+            invoice.status_transitions.voided_at, timezone.utc) < toTime) or (invoice.status_transitions.marked_uncollectible_at and datetime.fromtimestamp(
+                invoice.status_transitions.marked_uncollectible_at, timezone.utc) >= fromTime and datetime.fromtimestamp(
+                invoice.status_transitions.marked_uncollectible_at, timezone.utc) < toTime
+            ):
+            print("Warning: found earlier invoice {} changed status to {} in this month, consider downloading {} again".format(invoice.id, status, datetime.fromtimestamp(
+                invoice.status_transitions.finalized_at, timezone.utc).astimezone(stripe_datev.config.accounting_tz).strftime("%Y-%m")))
 
-    for creditNote in stripe.CreditNote.list(
-        created={
-          "gte": int(fromTime.timestamp()),
-          "lt": int(toTime.timestamp()),
-        },
-        expand=["data.invoice"]
-    ).auto_paging_iter():
-      invoiceFinalized = datetime.fromtimestamp(
-        creditNote.invoice.status_transitions.finalized_at, timezone.utc).astimezone(stripe_datev.config.accounting_tz)
-      if invoiceFinalized < fromTime:
-        print("Warning: found credit note {} for earlier invoice, consider downloading {} again".format(
-          creditNote.number, invoiceFinalized.strftime("%Y-%m")))
+      for creditNote in stripe.CreditNote.list(
+          created={
+            "gte": int(fromTime.timestamp()),
+            "lt": int(toTime.timestamp()),
+          },
+          expand=["data.invoice"]
+      ).auto_paging_iter():
+        invoiceFinalized = datetime.fromtimestamp(
+          creditNote.invoice.status_transitions.finalized_at, timezone.utc).astimezone(stripe_datev.config.accounting_tz)
+        if invoiceFinalized < fromTime:
+          print("Warning: found credit note {} for earlier invoice, consider downloading {} again".format(
+            creditNote.number, invoiceFinalized.strftime("%Y-%m")))
+
+  def validate_exports(self, argv):
+    parser = argparse.ArgumentParser(prog="stripe-datev-cli.py validate_exports")
+    parser.add_argument('year', type=int, nargs='?',
+                        help='year of the run folder, e.g. 2024')
+    parser.add_argument('month', type=int, nargs='?',
+                        help='month of the run folder, e.g. 6')
+    parser.add_argument('--path', type=str,
+                        help='explicit datev folder path to validate')
+
+    args = parser.parse_args(argv)
+
+    if args.path:
+      datev_dir = args.path
+    elif args.year is not None and args.month is not None:
+      run_root = output_layout.resolve_download_root(out_dir, args.year, args.month)
+      datev_dir = os.path.join(run_root, "datev")
+    else:
+      raise Exception("Provide either --path <datev_dir> or <year> <month>")
+
+    if not os.path.isdir(datev_dir):
+      raise Exception("DATEV export folder does not exist: {}".format(datev_dir))
+
+    result = datev_validation.validate_datev_folder(datev_dir)
+    print("Validated DATEV files in {}".format(os.path.relpath(datev_dir, os.getcwd())))
+    print("Files checked: {}".format(result["files_checked"]))
+    print("Rows checked: {}".format(result["rows_checked"]))
+    print("Errors: {}".format(result["errors_count"]))
+    if result["errors_count"] > 0:
+      for err in result["errors"][:50]:
+        print("Error:", err)
+      if result["errors_count"] > 50:
+        print("Error: {} additional issues suppressed".format(
+          result["errors_count"] - 50))
+      raise Exception("DATEV validation failed")
+    print("DATEV validation passed")
 
   def validate_customers(self, argv):
     stripe_datev.customer.validate_customers()
