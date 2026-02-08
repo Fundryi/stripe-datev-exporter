@@ -1,35 +1,119 @@
 [company]
+# ---------------------------------------------------------------------------
+# IMPORTANT:
+# - Change only the values to the right of "=".
+# - Do not rename keys on the left.
+# - This file is a template for config.toml.
+# ---------------------------------------------------------------------------
+
+# IANA timezone used for booking cutoffs and export dates.
+# For Germany, this is usually "Europe/Berlin".
+# Examples: "Europe/Berlin", "UTC"
 timezone = "Europe/Berlin"
-# Merchant country (ISO 3166-1 alpha-2), used for VAT classification
+
+# Merchant/company country as ISO 3166-1 alpha-2 code.
+# Examples: "DE", "AT", "US"
 country = "DE"
-# Optional override for EU country codes used by tax classification
+
+# Optional override for EU country list used by tax classification.
+# Usually not required unless your tax advisor requests custom handling.
+# Format: list of ISO 3166-1 alpha-2 strings.
 # eu_country_codes = ["AT", "BE", "BG", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE"]
 
+[download]
+# ---------------------------------------------------------------------------
+# Technical download defaults (not tax/accounting values).
+# ---------------------------------------------------------------------------
+
+# Default parallel worker count for PDF/receipt downloads (1..24).
+pdf_workers = 23
+
+# Maximum PDF/receipt HTTP requests per second.
+# Set 0 to disable throttling (not recommended).
+pdf_max_rps = 23
+
+# HTTP timeout (seconds) per PDF/receipt request.
+pdf_timeout = 30
+
+# Retry count for transient HTTP failures (429/5xx/timeouts).
+pdf_retries = 4
+
+# Skip cross-month historical warning scan by default (faster).
+skip_historical_warnings = true
+
 [datev]
+# ---------------------------------------------------------------------------
+# DATEV master data (usually provided by your tax advisor/accountant).
+# Digits only, no quotes.
+# ---------------------------------------------------------------------------
+
+# DATEV advisor number (Beraternummer).
+# Example: 1234567
 berater_nr = 1
+
+# DATEV client number (Mandantennummer) for the target client.
+# Example: 10001
+# Note: key name "mandenten_nr" must stay exactly as-is for compatibility.
 mandenten_nr = 1
 
 [accounts]
+# ---------------------------------------------------------------------------
+# Account mapping (must be provided by accounting/tax advisor).
+# All values are DATEV account numbers as quoted strings, e.g. "1200".
+# ---------------------------------------------------------------------------
+
+# Stripe bank/clearing account for incoming payment movements.
 bank = "1201"
+
+# Transit/clearing account for Stripe payout transfers.
 transit = "1360"
+
+# Account for Stripe contribution/adjustment postings.
 contributions = "4600"
+
+# Account for external services / connected transfer postings.
 external_services = "4909"
+
+# Expense account for Stripe processing fees.
 stripe_fees = "70025"
 
+# Collective debtor account (legacy pre-2022 logic only).
 sammel_debitor = "10001"
+
+# pRAP account (deferred revenue / passive accruals).
 prap = "990"
 
+# Revenue account for domestic/normal VAT-charged sales.
 revenue_german_vat = "8400"
+
+# Revenue account for EU reverse-charge (B2B with VAT-ID evidence).
 revenue_reverse_charge_eu = "8336"
+
+# Historical/fallback world account for non-EU handling.
 account_reverse_charge_world = "8338"
-# Optional: dedicated account for non-EU outside-scope/export revenue
-# Defaults to account_reverse_charge_world when omitted
+
+# Optional: dedicated account for non-EU outside-scope/export revenue.
+# Falls back to account_reverse_charge_world if omitted.
 revenue_non_eu_outside_scope = "8338"
-# Optional: fallback mapping for EU customers without VAT ID and tax=0
-# Defaults to revenue_german_vat when omitted
+
+# Optional: fallback account for EU customer without VAT ID and tax=0.
+# Falls back to revenue_german_vat if omitted.
 revenue_eu_b2c_missing_vat_id = "8400"
 
+# ---------------------------------------------------------------------------
+# DATEV BU keys as strings (empty string if not used).
+# Must be confirmed by your accountant/tax advisor.
+# ---------------------------------------------------------------------------
+
+# BU key for domestic VAT invoices.
+# Often empty if VAT is already represented via the account.
 datev_tax_key_germany_invoice = ""
+
+# BU key for domestic VAT payments.
 datev_tax_key_germany_payment = ""
+
+# BU key for reverse-charge invoices.
 datev_tax_key_reverse_invoice = ""
+
+# BU key for reverse-charge payments (common example: "40").
 datev_tax_key_reverse_payment = "40"
