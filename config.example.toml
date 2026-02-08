@@ -60,12 +60,25 @@ mandenten_nr = 1
 # ---------------------------------------------------------------------------
 # Account mapping (must be provided by accounting/tax advisor).
 # All values are DATEV account numbers as quoted strings, e.g. "1200".
+# IMPORTANT ACCOUNTING NOTE:
+# - Even if you have only ONE real bank account, you usually still use
+#   additional bookkeeping clearing accounts for Stripe flows.
+# - In this exporter:
+#   - `bank` = Stripe clearing account (Stripe balance/wallet), not your
+#     physical Hausbank account.
+#   - `transit` = payout clearing account used to reconcile Stripe payouts
+#     against your imported real bank statement.
 # ---------------------------------------------------------------------------
 
-# Stripe bank/clearing account for incoming payment movements.
+# Stripe clearing account for incoming payment movements and Stripe fees.
+# This should usually be a dedicated Stripe clearing account in DATEV.
 bank = "1201"
 
-# Transit/clearing account for Stripe payout transfers.
+# Transit/clearing account for Stripe payout transfers to your real bank.
+# Typical reconciliation flow:
+# 1) Export books payout from Stripe clearing (`bank`) to `transit`.
+# 2) Real bank statement import books receipt on Hausbank against `transit`.
+# 3) `transit` should clear to (near) zero.
 transit = "1360"
 
 # Account for Stripe contribution/adjustment postings.
