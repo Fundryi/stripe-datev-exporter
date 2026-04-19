@@ -41,6 +41,13 @@ pdf_retries = 4
 # Skip cross-month historical warning scan by default (faster).
 skip_historical_warnings = true
 
+# Skip downloading Stripe payment receipts (HTML files) by default.
+# Invoice PDFs are always downloaded. Receipts are optional payment-confirmation
+# pages — useful as audit trail but not required for German DATEV bookkeeping
+# (the invoice PDF already carries all GoBD-relevant data).
+# Set to true to halve download size and speed up the run.
+skip_receipts = false
+
 [datev]
 # ---------------------------------------------------------------------------
 # DATEV master data (usually provided by your tax advisor/accountant).
