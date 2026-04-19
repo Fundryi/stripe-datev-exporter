@@ -37,8 +37,55 @@ class OutputLayoutTest(unittest.TestCase):
     with tempfile.TemporaryDirectory() as tmpdir:
       paths = output_layout.ensure_download_dirs(tmpdir, 2024, 5)
       self.assertTrue(paths["root"].endswith(os.path.join("2024", "Q2", "2024-05")))
-      for key in ["pdf", "overview", "monthly_recognition", "datev", "logs"]:
+      for key in ["files", "invoices", "receipts", "overview", "monthly_recognition", "datev", "logs"]:
         self.assertTrue(os.path.isdir(paths[key]))
+      # invoices/receipts live under files/
+      self.assertTrue(paths["invoices"].endswith(os.path.join("files", "invoices")))
+      self.assertTrue(paths["receipts"].endswith(os.path.join("files", "receipts")))
+      # datev lives at quarter level (one up from month root)
+      self.assertTrue(paths["datev"].endswith(os.path.join("2024", "Q2", "datev")))
+      # Legacy lookup keys exist but their folders are not created
+      for legacy_key in ["pdf_legacy", "invoices_legacy_flat", "receipts_legacy_flat", "datev_legacy_month"]:
+        self.assertIn(legacy_key, paths)
+        self.assertFalse(os.path.isdir(paths[legacy_key]))
+
+  def test_ensure_download_dirs_full_year_keeps_datev_at_root(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      paths = output_layout.ensure_download_dirs(tmpdir, 2024, 0)
+      self.assertTrue(paths["root"].endswith(os.path.join("2024", "FULL_YEAR")))
+      self.assertTrue(paths["datev"].endswith(os.path.join("FULL_YEAR", "datev")))
+      self.assertTrue(os.path.isdir(paths["datev"]))
+
+  def test_resolve_datev_dir_monthly_and_full_year(self):
+    month_datev = output_layout.resolve_datev_dir("out", 2024, 6)
+    self.assertTrue(month_datev.endswith(os.path.join("2024", "Q2", "datev")))
+    full_year_datev = output_layout.resolve_datev_dir("out", 2024, 0)
+    self.assertTrue(full_year_datev.endswith(os.path.join("2024", "FULL_YEAR", "datev")))
+
+  def test_resolve_document_paths_returns_new_and_legacy(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      target = os.path.join(tmpdir, "invoices")
+      legacy = os.path.join(tmpdir, "pdf")
+      new_path, legacy_paths = output_layout.resolve_document_paths(
+        target, [legacy], "test.pdf", datetime(2024, 5, 15))
+      self.assertEqual(new_path, os.path.join(target, "test.pdf"))
+      self.assertIn(os.path.join(legacy, "test.pdf"), legacy_paths)
+      self.assertIn(os.path.join(legacy, "2024", "05", "test.pdf"), legacy_paths)
+      self.assertTrue(os.path.isdir(target))
+
+  def test_file_exists_accepts_legacy_list(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      target = os.path.join(tmpdir, "invoices")
+      legacy = os.path.join(tmpdir, "pdf")
+      new_path, legacy_paths = output_layout.resolve_document_paths(
+        target, [legacy], "test.pdf", datetime(2024, 5, 15))
+      self.assertFalse(output_layout.file_exists(new_path, legacy_paths))
+
+      legacy_flat = legacy_paths[0]
+      os.makedirs(os.path.dirname(legacy_flat), exist_ok=True)
+      with open(legacy_flat, "w") as fp:
+        fp.write("ok")
+      self.assertTrue(output_layout.file_exists(new_path, legacy_paths))
 
 
 if __name__ == "__main__":
