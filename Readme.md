@@ -38,13 +38,40 @@ Processes all invoices, charges and transactions in the given month, and writes 
 
 New output layout per monthly run:
 
+- `./out/<YYYY>/Q<1-4>/datev/` — **all EXTF CSVs for the whole quarter** (accountant's single import folder)
 - `./out/<YYYY>/Q<1-4>/<YYYY-MM>/overview/`
 - `./out/<YYYY>/Q<1-4>/<YYYY-MM>/monthly_recognition/`
-- `./out/<YYYY>/Q<1-4>/<YYYY-MM>/datev/`
-- `./out/<YYYY>/Q<1-4>/<YYYY-MM>/pdf/`
-- `./out/<YYYY>/Q<1-4>/<YYYY-MM>/logs/` (for your run logs)
+- `./out/<YYYY>/Q<1-4>/<YYYY-MM>/files/invoices/` — Stripe invoice PDFs (GoBD-relevant)
+- `./out/<YYYY>/Q<1-4>/<YYYY-MM>/files/receipts/` — Stripe payment receipts (HTML, optional, skip via `--skip-receipts`)
+- `./out/<YYYY>/Q<1-4>/<YYYY-MM>/logs/download-YYYYMMDD-HHMMSS.log` (auto-generated per run, written live during execution — captures stdout/stderr including Info/Warning lines and counts)
+
+Rationale for quarter-level `datev/`: an accountant imports one folder per DATEV-Buchungsperiode. With three monthly EXTF files per quarter sitting next to each other (`EXTF_YYYY-01_Revenue.csv`, `EXTF_YYYY-01_Balance.csv`, `EXTF_YYYY-02_…`), they select the quarter folder once and DATEV picks them all up.
+
+Legacy locations still recognised for re-runs on older months:
+- pre-2026-04: combined `./out/.../<YYYY-MM>/pdf/` folder
+- 2026-04 transition: flat `./out/.../<YYYY-MM>/invoices/` + `receipts/` (before `files/` nesting)
+- pre-quarter-datev: `./out/.../<YYYY-MM>/datev/` (month-level datev folder)
 
 Example (June 2024): `./out/2024/Q2/2024-06/...`
+
+### Bulk Export (Whole Quarter / Year)
+
+To produce the full quarterly folder structure (`./out/<YYYY>/Q1..Q4/<YYYY-MM>/...` with one shared `datev/` per quarter), loop monthly runs. The single-month run auto-groups into the right quarter folder — no year-mode switch needed.
+
+PowerShell (Windows):
+
+```powershell
+# Full year (12 monthly runs → Q1..Q4 folders)
+1..12 | ForEach-Object { uv run stripe-datev-cli.py download 2024 $_ }
+
+# Single quarter (Q2 = months 4..6)
+4..6  | ForEach-Object { uv run stripe-datev-cli.py download 2024 $_ }
+
+# Validate every quarter of the year (checks each Q*/datev folder)
+1,4,7,10 | ForEach-Object { uv run stripe-datev-cli.py validate_exports 2024 $_ }
+```
+
+Note: `download <year> 0` also exists but produces a flat `./out/<YYYY>/FULL_YEAR/` layout without quarter grouping. For the accountant-friendly quarterly structure use the monthly loop above.
 
 Download options:
 
@@ -54,11 +81,13 @@ Download options:
 - `--pdf-retries`: retries for transient PDF/receipt errors like 429/5xx (default from `config.toml`)
 - `--skip-historical-warnings`: skip cross-month warning scan for earlier invoice status changes / credit notes
 - `--include-historical-warnings`: force-enable historical warning scan
+- `--skip-receipts`: skip Stripe payment receipt (HTML) downloads — only invoice PDFs (default from `config.toml:[download].skip_receipts`)
+- `--include-receipts`: force-enable receipt downloads even if config defaults to skip
 
-Store command logs in the month folder (PowerShell example):
+Command logs are written automatically to `out/<YYYY>/Q<1-4>/<YYYY-MM>/logs/download-<timestamp>.log` during each run (live, line-buffered). No manual redirect needed. If you still want to capture the raw terminal view (including progress counters with no ANSI re-writes), you can redirect on top:
 
 ```powershell
-uv run stripe-datev-cli.py download 2024 6 --pdf-workers 23 --pdf-max-rps 23 --skip-historical-warnings *> out/2024/Q2/2024-06/logs/download.log
+uv run stripe-datev-cli.py download 2024 6 *> out/2024/Q2/2024-06/logs/terminal.log
 ```
 
 Default performance profile (in `config.toml` / `config.example.toml`):
@@ -68,6 +97,7 @@ Default performance profile (in `config.toml` / `config.example.toml`):
 - `download.pdf_timeout = 30`
 - `download.pdf_retries = 4`
 - `download.skip_historical_warnings = true`
+- `download.skip_receipts = false` (set `true` to only download invoice PDFs, no HTML receipts)
 
 Note on warning `unknown period for line item ... Payment for Invoice #...`:
 
