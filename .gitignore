@@ -45,3 +45,31 @@ out/*
 out
 
 upload*.sh
+
+# Local run artefacts (may contain customer metadata)
+.fill_account_numbers_log.json
+*_log.json
+
+# ── WORKSPACE workspace hardening ────────────────────────────────────────────
+# Extra belt-and-braces to keep real accounting data out of this OSS repo.
+# The orchestrator in `../firma-orchestrator/orchestrator/` is what reads real
+# data; this exporter is treated as a pure code library.
+.env.*
+config.local.toml
+config.*.toml
+!config.example.toml
+*.key
+*.pem
+*.pfx
+# Any real data checked in by mistake under tests/fixtures/
+tests/fixtures/real_*
+tests/fixtures/**/real_*
+# Invoice / receipt / statement PDFs should never be in the repo
+*.pdf
+!docs/**/*.pdf
+# CSVs outside examples
+*.csv
+!tests/fixtures/*.csv
+!config/**/*.csv
+!examples/**/*.csv
+
