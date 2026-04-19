@@ -83,6 +83,12 @@ class StripeDatevCli(object):
                         help='skip Stripe payment receipt (HTML) downloads — only invoice PDFs')
     parser.add_argument('--include-receipts', dest='skip_receipts', action='store_false',
                         help='force-enable receipt downloads even if config defaults to skip')
+    parser.set_defaults(auto_fill_account_numbers=bool(
+      stripe_datev.config.download.get("auto_fill_account_numbers", True)))
+    parser.add_argument('--auto-fill-account-numbers', dest='auto_fill_account_numbers', action='store_true',
+                        help='auto-assign accountNumber metadata to new Stripe customers before download (default)')
+    parser.add_argument('--no-auto-fill-account-numbers', dest='auto_fill_account_numbers', action='store_false',
+                        help='disable auto-fill; fail if any customer lacks accountNumber metadata')
 
     args = parser.parse_args(argv)
 
@@ -96,6 +102,8 @@ class StripeDatevCli(object):
       self._download_body(args, year, month)
 
   def _download_body(self, args, year, month):
+    if getattr(args, "auto_fill_account_numbers", True):
+      stripe_datev.customer.fill_account_numbers()
     if month > 0:
       fromTime = stripe_datev.config.accounting_tz.localize(
         datetime(year, month, 1, 0, 0, 0, 0))

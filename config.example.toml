@@ -48,6 +48,14 @@ skip_historical_warnings = true
 # Set to true to halve download size and speed up the run.
 skip_receipts = false
 
+# Auto-assign accountNumber metadata to new Stripe customers at the start of
+# every `download` run. Re-running is cheap: fill_account_numbers() early-breaks
+# on the first customer that already has an accountNumber. Prevents mid-run
+# crashes when new customers appear between exports.
+# Set to false to disable (then run `fill_account_numbers` manually before
+# each download, or the run will fail on unnumbered customers).
+auto_fill_account_numbers = true
+
 [datev]
 # ---------------------------------------------------------------------------
 # DATEV master data (usually provided by your tax advisor/accountant).

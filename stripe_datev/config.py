@@ -44,5 +44,6 @@ download = {
   "pdf_retries": 4,
   "skip_historical_warnings": True,
   "skip_receipts": False,
+  "auto_fill_account_numbers": True,
 }
 download.update(config.get("download", {}))
