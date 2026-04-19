@@ -20,8 +20,9 @@ import pytz
 from stripe_datev_local import output_layout
 from stripe_datev_local import downloads
 from stripe_datev_local import datev_validation
+from stripe_datev_local import run_logging
 
-dotenv.load_dotenv()
+dotenv.load_dotenv(os.path.join(os.path.dirname(os.path.realpath(__file__)), ".env"))
 
 if "STRIPE_API_KEY" not in os.environ:
   print("Require STRIPE_API_KEY environment variable to be set")
@@ -76,12 +77,25 @@ class StripeDatevCli(object):
                         help='skip cross-month warning scan for earlier invoice changes and credit notes')
     parser.add_argument('--include-historical-warnings', dest='skip_historical_warnings', action='store_false',
                         help='force-enable cross-month warning scan even if config defaults to skip')
+    parser.set_defaults(skip_receipts=bool(
+      stripe_datev.config.download.get("skip_receipts", False)))
+    parser.add_argument('--skip-receipts', dest='skip_receipts', action='store_true',
+                        help='skip Stripe payment receipt (HTML) downloads — only invoice PDFs')
+    parser.add_argument('--include-receipts', dest='skip_receipts', action='store_false',
+                        help='force-enable receipt downloads even if config defaults to skip')
 
     args = parser.parse_args(argv)
 
     year = int(args.year)
     month = int(args.month)
 
+    run_root = output_layout.resolve_download_root(out_dir, year, month)
+    logs_dir = os.path.join(run_root, "logs")
+
+    with run_logging.tee_run_log(logs_dir):
+      self._download_body(args, year, month)
+
+  def _download_body(self, args, year, month):
     if month > 0:
       fromTime = stripe_datev.config.accounting_tz.localize(
         datetime(year, month, 1, 0, 0, 0, 0))
@@ -164,9 +178,12 @@ class StripeDatevCli(object):
     stripe_datev.output.writeRecords(os.path.join(datevDir, "EXTF_{}_Balance.csv".format(
       balance_label)), balance_records, bezeichung="Stripe Balance {}".format(balance_label))
 
-    # PDF
+    # Invoices (PDF) + Receipts (HTML)
 
-    pdfDir = output_dirs["pdf"]
+    invoicesDir = output_dirs["invoices"]
+    receiptsDir = output_dirs["receipts"]
+    invoicesLegacy = [output_dirs["invoices_legacy_flat"], output_dirs["pdf_legacy"]]
+    receiptsLegacy = [output_dirs["receipts_legacy_flat"], output_dirs["pdf_legacy"]]
 
     pdf_jobs = []
     pdf_skipped_existing = 0
@@ -179,10 +196,9 @@ class StripeDatevCli(object):
       invNo = invoice.number
 
       fileName = "{} {}.pdf".format(finalized_date.strftime("%Y-%m-%d"), invNo)
-      filePath, legacyFilePath = output_layout.resolve_pdf_paths(
-        pdfDir, fileName, finalized_date)
-      if output_layout.file_exists(filePath, legacyFilePath):
-        # print("{} exists, skipping".format(filePath))
+      filePath, legacyPaths = output_layout.resolve_document_paths(
+        invoicesDir, invoicesLegacy, fileName, finalized_date)
+      if output_layout.file_exists(filePath, legacyPaths):
         pdf_skipped_existing += 1
         continue
 
@@ -194,27 +210,29 @@ class StripeDatevCli(object):
         "file_path": filePath,
       })
 
-    for charge in charges + list(map(lambda tx: tx["source"]["destination_payment"], filter(lambda tx: tx["type"] == "transfer", balance_transactions))):
-      if charge is None:
-        continue
-      created = datetime.fromtimestamp(charge.created, timezone.utc)
-      fileName = "{} {}.html".format(
-        created.strftime("%Y-%m-%d"), charge.receipt_number or charge.id)
-      filePath, legacyFilePath = output_layout.resolve_pdf_paths(
-        pdfDir, fileName, created)
-      if output_layout.file_exists(filePath, legacyFilePath):
-        # print("{} exists, skipping".format(filePath))
-        pdf_skipped_existing += 1
-        continue
+    if not args.skip_receipts:
+      for charge in charges + list(map(lambda tx: tx["source"]["destination_payment"], filter(lambda tx: tx["type"] == "transfer", balance_transactions))):
+        if charge is None:
+          continue
+        created = datetime.fromtimestamp(charge.created, timezone.utc)
+        fileName = "{} {}.html".format(
+          created.strftime("%Y-%m-%d"), charge.receipt_number or charge.id)
+        filePath, legacyPaths = output_layout.resolve_document_paths(
+          receiptsDir, receiptsLegacy, fileName, created)
+        if output_layout.file_exists(filePath, legacyPaths):
+          pdf_skipped_existing += 1
+          continue
 
-      pdfLink = charge["receipt_url"]
-      if not pdfLink:
-        pdf_skipped_missing_link += 1
-        continue
-      pdf_jobs.append({
-        "url": pdfLink,
-        "file_path": filePath,
-      })
+        pdfLink = charge["receipt_url"]
+        if not pdfLink:
+          pdf_skipped_missing_link += 1
+          continue
+        pdf_jobs.append({
+          "url": pdfLink,
+          "file_path": filePath,
+        })
+    else:
+      print("Skipping Stripe payment receipt (HTML) downloads (--skip-receipts)")
 
     pdf_workers = downloads.bounded_workers(args.pdf_workers, default_workers=3)
     print("PDF download queue: {} file(s), skipped existing {}, skipped missing link {}, workers {}, max_rps {}, timeout {}s, retries {}".format(
@@ -287,8 +305,14 @@ class StripeDatevCli(object):
     if args.path:
       datev_dir = args.path
     elif args.year is not None and args.month is not None:
-      run_root = output_layout.resolve_download_root(out_dir, args.year, args.month)
-      datev_dir = os.path.join(run_root, "datev")
+      datev_dir = output_layout.resolve_datev_dir(out_dir, args.year, args.month)
+      if not os.path.isdir(datev_dir):
+        legacy_month_dir = os.path.join(
+          output_layout.resolve_download_root(out_dir, args.year, args.month),
+          "datev",
+        )
+        if os.path.isdir(legacy_month_dir):
+          datev_dir = legacy_month_dir
     else:
       raise Exception("Provide either --path <datev_dir> or <year> <month>")
 
@@ -408,7 +432,15 @@ class StripeDatevCli(object):
     print("Contributions {0:.2f} EUR".format(contributionsTotal))
 
   def preview(self, argv):
-    object_id = argv[0]
+    parser = argparse.ArgumentParser(prog="stripe-datev-cli.py preview")
+    parser.add_argument(
+      "object_id",
+      type=str,
+      help="Stripe object id (invoice in_..., charge ch_..., or balance transaction txn_...)",
+    )
+    args = parser.parse_args(argv)
+
+    object_id = args.object_id
     if object_id.startswith("in_"):
       invoice = stripe_datev.invoices.retrieveInvoice(object_id)
       print("Previewing accounting records for invoice {} / {}".format(object_id, invoice["number"]))
@@ -432,7 +464,7 @@ class StripeDatevCli(object):
       print("Previewing accounting records for balance transaction {}".format(object_id))
       records = stripe_datev.balance.createAccountingRecords([balance_transaction])
     else:
-      raise "Unsupported object ID for preview"
+      raise Exception("Unsupported object ID for preview: {}".format(object_id))
 
     records_by_month = {}
     for record in records:
