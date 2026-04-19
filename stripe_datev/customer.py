@@ -218,14 +218,19 @@ def getAccountingProps(customer, invoice=None, checkout_session=None):
     props["vat_region"] = "Unknown"
 
   warning = tax_context["warning"]
-  if warning:
+  info = tax_context.get("info")
+  if warning or info:
     invoice_or_session_id = "n/a"
     if invoice is not None:
       invoice_or_session_id = _obj_get(invoice, "id", "n/a")
     elif checkout_session is not None:
       invoice_or_session_id = _obj_get(checkout_session, "id", "n/a")
-    print("Warning: {} {} {}".format(
-      warning, _obj_get(customer, "id", "n/a"), invoice_or_session_id))
+    if warning:
+      print("Warning: {} {} {}".format(
+        warning, _obj_get(customer, "id", "n/a"), invoice_or_session_id))
+    if info:
+      print("Info: {} {} {}".format(
+        info, _obj_get(customer, "id", "n/a"), invoice_or_session_id))
 
   if tax_classification == TAX_CLASS_EU_REVERSE_CHARGE:
     props["revenue_account"] = _account_value("revenue_reverse_charge_eu")
