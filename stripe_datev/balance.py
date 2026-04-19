@@ -158,6 +158,18 @@ def createAccountingRecords(balance_transactions):
       # Not relevant for accounting on the company side
       pass
 
+    elif tx["reporting_category"] in ("advance", "advance_funding"):
+      # Stripe internal mechanics for Instant Payouts: pending-to-available
+      # reshuffling of funds. The actual cash movement is captured by the
+      # paired `payout` balance transaction, so booking these would
+      # double-count the transfer.
+      pass
+
+    elif tx["reporting_category"] == "other_adjustment" and int(tx.get("amount") or 0) == 0:
+      # Zero-amount adjustments are Stripe internal markers (e.g. "Hold in
+      # reserved balance") with no cash impact.
+      pass
+
     else:
       print(
         "Warning: unsupported balance transaction type:", tx["type"], "reporting_category:", tx["reporting_category"], tx["id"])
