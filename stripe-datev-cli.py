@@ -377,17 +377,17 @@ class StripeDatevCli(object):
 
     totals = []
     for invoice in invoices:
-      finalized_at = invoice.status_transitions.get("finalized_at", None)
+      finalized_at = getattr(invoice.status_transitions, "finalized_at", None)
       if finalized_at is None or datetime.fromtimestamp(finalized_at, tz=timezone.utc) > ref:
         continue
-      marked_uncollectible_at = invoice.status_transitions.get(
-        "marked_uncollectible_at", None)
+      marked_uncollectible_at = getattr(
+        invoice.status_transitions, "marked_uncollectible_at", None)
       if marked_uncollectible_at is not None and datetime.fromtimestamp(marked_uncollectible_at, tz=timezone.utc) <= ref:
         continue
-      voided_at = invoice.status_transitions.get("voided_at", None)
+      voided_at = getattr(invoice.status_transitions, "voided_at", None)
       if voided_at is not None and datetime.fromtimestamp(voided_at, tz=timezone.utc) <= ref:
         continue
-      paid_at = invoice.status_transitions.get("paid_at", None)
+      paid_at = getattr(invoice.status_transitions, "paid_at", None)
       if paid_at is not None and datetime.fromtimestamp(paid_at, tz=timezone.utc) <= ref:
         continue
 

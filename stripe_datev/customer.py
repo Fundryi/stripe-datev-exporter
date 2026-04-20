@@ -28,7 +28,7 @@ def retrieveCustomer(id):
 
 
 def getCustomerName(customer):
-  if customer.get("deleted", False):
+  if getattr(customer, "deleted", False):
     return customer.id
   if customer.description is not None:
     return customer.description
@@ -159,7 +159,7 @@ def getAccountingProps(customer, invoice=None, checkout_session=None):
   finalized_at = _nested_get(invoice, ["status_transitions", "finalized_at"])
   customer_metadata = _obj_get(customer, "metadata") or {}
   if (invoice is None or finalized_at is None or datetime.fromtimestamp(finalized_at, timezone.utc) >= datetime(2022, 1, 1, 0, 0).astimezone(config.accounting_tz)):
-    if not customer_metadata.get("accountNumber", None):
+    if not getattr(customer_metadata, "accountNumber", None):
       raise Exception("Expected 'accountNumber' in metadata")
     props["customer_account"] = customer_metadata["accountNumber"]
   else:
