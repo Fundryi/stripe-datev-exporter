@@ -114,8 +114,7 @@ def createAccountingRecords(balance_transactions):
       transfer = tx.source
       net_amount = transfer.amount - \
           ((transfer.source_transaction.application_fee_amount if transfer.source_transaction else None) or 0)
-      invoice = transfer.source_transaction.get(
-        "invoice", None) if transfer.source_transaction else None
+      invoice = getattr(transfer.source_transaction, "invoice", None) if transfer.source_transaction else None
       invoiceNumber = invoice.number if invoice else None
 
       records.append({
@@ -165,7 +164,7 @@ def createAccountingRecords(balance_transactions):
       # double-count the transfer.
       pass
 
-    elif tx["reporting_category"] == "other_adjustment" and int(tx.get("amount") or 0) == 0:
+    elif tx["reporting_category"] == "other_adjustment" and int(getattr(tx, "amount", 0) or 0) == 0:
       # Zero-amount adjustments are Stripe internal markers (e.g. "Hold in
       # reserved balance") with no cash impact.
       pass

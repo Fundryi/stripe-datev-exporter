@@ -65,14 +65,14 @@ def getLineItemRecognitionRange(line_item, invoice):
   start = None
   end = None
   if "period" in line_item:
-    period_start = line_item["period"].get("start")
-    period_end = line_item["period"].get("end")
+    period_start = getattr(line_item["period"], "start", None)
+    period_end = getattr(line_item["period"], "end", None)
     if period_start is not None and period_end is not None:
       start = datetime.fromtimestamp(period_start, timezone.utc)
       end = datetime.fromtimestamp(period_end, timezone.utc)
       if end < start:
         print("Warning: invalid period for line item --",
-              invoice.id, line_item.get("description"))
+              invoice.id, getattr(line_item, "description", None))
         start = None
         end = None
 
@@ -85,8 +85,8 @@ def getLineItemRecognitionRange(line_item, invoice):
 
   if start is None and end is None:
     try:
-      date_range = dateparser.find_date_range(line_item.get(
-        "description"), created, tz=config.accounting_tz)
+      date_range = dateparser.find_date_range(getattr(
+        line_item, "description", None), created, tz=config.accounting_tz)
       if date_range is not None:
         start, end = date_range
 
@@ -96,7 +96,7 @@ def getLineItemRecognitionRange(line_item, invoice):
 
   if start is None and end is None:
     print("Warning: unknown period for line item --",
-          invoice.id, line_item.get("description"))
+          invoice.id, getattr(line_item, "description", None))
     start = created
     end = created
 
@@ -109,7 +109,9 @@ def getLineItemRecognitionRange(line_item, invoice):
 def createRevenueItems(invs):
   revenue_items = []
   for invoice in invs:
-    if invoice["metadata"].get("stripe-datev-exporter:ignore", "false") == "true":
+    _meta = invoice["metadata"]
+    if ("stripe-datev-exporter:ignore" in _meta
+        and _meta["stripe-datev-exporter:ignore"] == "true"):
       print("Skipping invoice {} (ignore)".format(invoice.id))
       continue
 
@@ -149,7 +151,7 @@ def createRevenueItems(invs):
     finalized_date = datetime.fromtimestamp(
       invoice.status_transitions.finalized_at, timezone.utc).astimezone(config.accounting_tz)
 
-    is_subscription = invoice.get("subscription", None) is not None
+    is_subscription = getattr(invoice, "subscription", None) is not None
 
     if invoice.lines.has_more:
       lines = invoice.lines.list().auto_paging_iter()
@@ -158,7 +160,7 @@ def createRevenueItems(invs):
 
     for line_item_idx, line_item in enumerate(lines):
       text = "Invoice {} / {}".format(invoice.number,
-                                      line_item.get("description", ""))
+                                      getattr(line_item, "description", ""))
       start, end = getLineItemRecognitionRange(line_item, invoice)
 
       li_amount_net = decimal.Decimal(line_item["amount"]) / 100
@@ -476,7 +478,7 @@ def to_recognized_month_csv2(revenue_items):
 
           revenue_item["customer"]["id"],
           customer.getCustomerName(revenue_item["customer"]),
-          revenue_item["customer"].get("address", {}).get("country", ""),
+          getattr(getattr(revenue_item["customer"], "address", None), "country", ""),
 
           accounting_date.strftime("%Y-%m-%d"),
           revenue_type,
