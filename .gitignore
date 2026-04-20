@@ -73,3 +73,13 @@ tests/fixtures/**/real_*
 !config/**/*.csv
 !examples/**/*.csv
 
+# Local-only working docs (AI instructions, research, worklogs)
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+LOCAL_CHANGELOG.md
+*_WORKLOG.md
+*_RESEARCH.md
+*_SYNC_PLAN.md
+.local-docs-backup/
+
